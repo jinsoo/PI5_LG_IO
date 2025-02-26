@@ -54,7 +54,7 @@ const LGPIO_LIB_LOCK = ReentrantLock()
 # Use a wrapper function that safely loads the library
 function get_lgpio_lib()
   @static if Sys.islinux()
-    lib_path = "liblgpio.so"
+    lib_path = "/usr/lib/liblgpio.so"
     try
       return Libdl.dlopen(lib_path)
     catch e
