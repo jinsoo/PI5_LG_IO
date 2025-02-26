@@ -64,9 +64,7 @@ function get_lgpio_lib()
     error("lgpio is only available on Linux systems")
   end
 end
-
 const LGPIO_LIB = get_lgpio_lib()
-
 # Function to get a pointer to a function in the library
 function get_func(func_name)
   lock(LGPIO_LIB_LOCK) do

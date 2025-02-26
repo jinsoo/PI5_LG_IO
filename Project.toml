@@ -1,6 +1,6 @@
-name = "pi5_lg_io"
+name = "PI5_LG_IO"
 uuid = "5fd6ec1f-d545-475a-9735-234e8bedae5e"
-authors = ["taeho <virtalf@gmail.com>"]
+authors = ["Jin-Soo Kim <virtalf@gmail.com>"]
 version = "0.1.0"
 
 [deps]
@@ -12,3 +12,4 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 CEnum = "0.5.0"
 Libdl = "1.11.0"
 Printf = "1.11.0"
+julia = ">=1.6"
