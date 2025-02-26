@@ -1,7 +1,7 @@
 name = "PI5_LG_IO"
 uuid = "5fd6ec1f-d545-475a-9735-234e8bedae5e"
 authors = ["Jin-Soo Kim <virtalf@gmail.com>"]
-version = "0.1.0"
+version = "1.0.0"
 
 [deps]
 CEnum = "fa961155-64e5-5f13-b03f-caf6b980ea82"

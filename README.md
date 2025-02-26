@@ -31,7 +31,9 @@ sudo apt-get update
 sudo apt-get install liblgpio-dev
 ```
 
-2. Add the PI5_LG_IO module to your Julia project:
+2. copy liblgpio.so to /usr/lib folder
+
+3. Add the PI5_LG_IO module to your Julia project:
 
 ```julia
 using Pkg

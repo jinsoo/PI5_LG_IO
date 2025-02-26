@@ -26,7 +26,7 @@ export lg_gpiochip_open, lg_gpiochip_close, lg_gpio_get_chip_info, lg_gpio_get_l
   lg_get_internal, lg_set_internal, lg_sbc_name,
   lg_set_work_dir, lg_get_work_dir,
   get_gpio_chips, print_all_gpio_chips_info, print_chip_info, print_line_info,
-  print_all_lines_info, print_gpio_info, cleanup
+  print_all_lines_info, print_gpio_info, cleanup, is_liblgpio_usable, check_package_configuration, load_lgpio_library
 
 # Define constants first for better organization
 # GPIO Constants
@@ -48,31 +48,111 @@ const LG_SET_PULL_UP = 32
 const LG_SET_PULL_DOWN = 64
 const LG_SET_PULL_NONE = 128
 
-# Load the lgpio library
+# Replace the existing library loading code with this
+mutable struct LibraryState
+  handle::Ptr{Nothing}
+  loaded::Bool
+  error::String
+end
+
+const LGPIO_STATE = LibraryState(C_NULL, false, "")
 const LGPIO_LIB_LOCK = ReentrantLock()
 
-# Use a wrapper function that safely loads the library
-function get_lgpio_lib()
-  @static if Sys.islinux()
-    lib_path = "/usr/lib/liblgpio.so"
-    try
-      return Libdl.dlopen(lib_path)
-    catch e
-      error("Could not load library $lib_path: $e. Make sure it's installed on your system.")
+function load_lgpio_library()
+  # Only attempt to load once
+  if LGPIO_STATE.loaded
+    return LGPIO_STATE.handle
+  end
+
+  lock(LGPIO_LIB_LOCK) do
+    # Check again after acquiring the lock
+    if LGPIO_STATE.loaded
+      return LGPIO_STATE.handle
     end
-  else
-    error("lgpio is only available on Linux systems")
+
+    @static if Sys.islinux()
+      lib_path = "/usr/lib/liblgpio.so"
+      try
+        handle = Libdl.dlopen(lib_path; throw_error=false)
+        if handle == C_NULL
+          LGPIO_STATE.error = "Failed to load $lib_path (null handle)"
+        else
+          LGPIO_STATE.handle = handle
+        end
+      catch e
+        LGPIO_STATE.error = "Error loading $lib_path: $e"
+      end
+    else
+      LGPIO_STATE.error = "lgpio is only available on Linux systems"
+    end
+
+    LGPIO_STATE.loaded = true
+    return LGPIO_STATE.handle
   end
 end
-const LGPIO_LIB = get_lgpio_lib()
-# Function to get a pointer to a function in the library
+
+# Replace the existing get_func with this safer version
 function get_func(func_name)
+  handle = load_lgpio_library()
+  if handle == C_NULL
+    error("LGPIO library not loaded: $(LGPIO_STATE.error)")
+  end
+
   lock(LGPIO_LIB_LOCK) do
-    sym = Libdl.dlsym(LGPIO_LIB, func_name)
-    if sym == C_NULL
-      error("Function $func_name not found in liblgpio.so")
+    try
+      sym = Libdl.dlsym_e(handle, func_name)
+      if sym == C_NULL
+        error("Function $func_name not found in liblgpio.so")
+      end
+      return sym
+    catch e
+      error("Error accessing function $func_name: $e")
     end
-    return sym
+  end
+end
+function check_package_configuration()
+  results = Dict()
+
+  # Check if we can load the library
+  handle = load_lgpio_library()
+  results["library_loaded"] = handle != C_NULL
+  results["library_error"] = LGPIO_STATE.error
+
+  # Check Julia environment
+  results["julia_version"] = string(VERSION)
+  results["libc_path"] = Base.BinaryPlatforms.libc_lib
+
+  # Check if some basic functions are available
+  if handle != C_NULL
+    test_functions = [:lguVersion, :lgGpiochipOpen, :lgGpioRead]
+    for func in test_functions
+      try
+        sym = Libdl.dlsym_e(handle, func)
+        results["func_$(func)"] = sym != C_NULL
+      catch
+        results["func_$(func)"] = false
+      end
+    end
+  end
+
+  return results
+end
+
+function __init__()
+  # Initialize the library when module is loaded
+  load_lgpio_library()
+
+  # Make sure to cleanup when Julia exits
+  atexit() do
+    if LGPIO_STATE.handle != C_NULL
+      try
+        Libdl.dlclose(LGPIO_STATE.handle)
+        LGPIO_STATE.handle = C_NULL
+        LGPIO_STATE.loaded = false
+      catch
+        # Ignore errors during cleanup
+      end
+    end
   end
 end
 
@@ -752,6 +832,14 @@ end
 function lg_get_work_dir()
   ptr = ccall(get_func(:lguGetWorkDir), Cstring, ())
   return unsafe_string(ptr)
+end
+function is_liblgpio_usable()
+  try
+    sym = Libdl.dlsym_e(LGPIO_LIB, :lguVersion)
+    return sym != C_NULL
+  catch
+    return false
+  end
 end
 # Clean up function with improved resource management
 function cleanup()
