@@ -10,11 +10,14 @@ PI5_LG_IO enables Julia programs to interact with hardware connected to a Raspbe
 
 - GPIO management (input, output, alerts)
 - PWM and waveform generation
-- I2C communication
+- I2C communication with comprehensive transaction support
 - SPI communication
 - Serial port access
 - Hardware notifications and callbacks
+- Thread management for parallel operations
 - Utility functions (timing, error handling)
+- Improved error handling and debugging
+- Comprehensive inline documentation
 
 ## Requirements
 
@@ -31,13 +34,17 @@ sudo apt-get update
 sudo apt-get install liblgpio-dev
 ```
 
-2. copy liblgpio.so to /usr/lib folder
+2. Copy liblgpio.so to /usr/lib folder
 
 3. Add the PI5_LG_IO module to your Julia project:
 
 ```julia
+# You can add this package from a local path or GitHub repository
 using Pkg
-Pkg.add("https://github.com/your-username/PI5_LG_IO.jl")
+Pkg.add(path="https://github.com/jinsoo/PI5_LG_IO")
+
+# Or import directly if the module is in your Julia load path
+using PI5_LG_IO
 ```
 
 ## Raspberry Pi Configuration
@@ -50,7 +57,7 @@ dtparam=spi=on
 # SPI0 configuration (default pins: MOSI=10, MISO=9, SCLK=11, CS0=8, CS1=7)
 dtoverlay=spi0-2cs
 # SPI1 configuration (default pins: MOSI=20, MISO=19, SCLK=21, CS0=18, CS1=17)
-dtoverlay=spi1-3cs
+dtoverlay=spi1-2cs
 ```
 
 After updating the configuration, reboot your Raspberry Pi for the changes to take effect:
@@ -130,6 +137,44 @@ end
 lg_i2c_close(handle)
 ```
 
+### Advanced I2C with Multiple Transactions
+
+```julia
+using PI5_LG_IO
+
+# Open I2C device
+i2c_dev = 1
+i2c_addr = 0x50  # Example EEPROM address
+handle = lg_i2c_open(i2c_dev, i2c_addr, 0)
+
+if handle < 0
+    println("Error opening I2C device: $(lg_error_text(handle))")
+    exit(1)
+end
+
+# Create I2C messages for a write-then-read operation
+# First message: Write memory address to read from
+addr_buf = [0x00, 0x10]  # Memory address 0x0010
+write_msg = LGI2CMsg(i2c_addr, 0, length(addr_buf), addr_buf)
+
+# Second message: Read 8 bytes from that address
+read_buf = Vector{UInt8}(undef, 8)
+read_msg = LGI2CMsg(i2c_addr, 1, length(read_buf), read_buf)  # Flag 1 = read operation
+
+# Perform the combined transaction
+messages = [write_msg, read_msg]
+result = lg_i2c_segments(handle, messages)
+
+if result >= 0
+    println("Read $(result) bytes: $(read_buf)")
+else
+    println("Error in I2C transaction: $(lg_error_text(result))")
+end
+
+# Clean up
+lg_i2c_close(handle)
+```
+
 ### SPI Example
 
 ```julia
@@ -139,7 +184,8 @@ using PI5_LG_IO
 spi_dev = 0  # SPI0 on Raspberry Pi
 spi_chan = 0  # CE0
 spi_baud = 1_000_000  # 1MHz
-handle = lg_spi_open(spi_dev, spi_chan, spi_baud, 0)
+spi_flags = 0  # No special flags
+handle = lg_spi_open(spi_dev, spi_chan, spi_baud, spi_flags)
 
 if handle < 0
     println("Error opening SPI device: $(lg_error_text(handle))")
@@ -215,6 +261,48 @@ lg_gpio_free(handle, gpio)
 lg_gpiochip_close(handle)
 ```
 
+### Thread Management Example
+
+```julia
+using PI5_LG_IO
+
+# Define a function to run in a separate thread
+function background_task(data)
+    println("Background thread started with data: $data")
+    for i in 1:10
+        println("Thread iteration $i")
+        lg_sleep(1)
+    end
+    println("Background thread completed")
+end
+
+# Start a thread with the function and some data
+thread_data = "Sample data"
+thread_id = lg_thread_start(background_task, thread_data)
+
+if thread_id < 0
+    println("Error starting thread: $(lg_error_text(thread_id))")
+    exit(1)
+end
+
+println("Main thread continues while background thread runs...")
+
+# Do some work in the main thread
+for i in 1:5
+    println("Main thread iteration $i")
+    lg_sleep(0.5)
+end
+
+# Wait for background thread to finish
+println("Waiting for background thread to complete...")
+lg_sleep(6)
+
+# Stop the thread (if it's still running)
+lg_thread_stop(thread_id)
+
+println("Done.")
+```
+
 ## Utility Functions
 
 The module provides several utility functions to help with hardware interaction:
@@ -222,7 +310,12 @@ The module provides several utility functions to help with hardware interaction:
 - `print_gpio_info()`: Print information about available GPIO chips and lines
 - `print_chip_info()`: Print information about a specific GPIO chip
 - `print_line_info()`: Print information about a specific GPIO line
+- `print_all_lines_info()`: Print information about all lines on a chip
+- `print_all_gpio_chips_info()`: Print information about all available GPIO chips
 - `get_gpio_chips()`: Get a list of available GPIO chips
+- `is_liblgpio_usable()`: Check if the lgpio library is available and usable
+- `check_package_configuration()`: Check the configuration of the package and library
+- `lg_error_text()`: Get a human-readable description for an error code
 
 Example:
 
@@ -237,11 +330,33 @@ chip = 0
 handle = lg_gpiochip_open(chip)
 print_chip_info(handle)
 lg_gpiochip_close(handle)
+
+# Check if the library is properly loaded
+if is_liblgpio_usable()
+    println("lgpio library is available and usable")
+else
+    println("lgpio library is not properly installed or not available")
+end
+
+# Get detailed configuration information
+config = check_package_configuration()
+for (key, value) in config
+    println("$key: $value")
+end
 ```
 
 ## Error Handling
 
-Most functions return negative values to indicate errors. Use the `lg_error_text()` function to get a human-readable error message:
+The module includes improved error handling with debug logging. When a function encounters an error, it will log the error message using Julia's logging system.
+
+By default, only warnings and errors are shown. To see debug messages:
+
+```julia
+using Logging
+global_logger(ConsoleLogger(stderr, Logging.Debug))
+```
+
+You can also check for errors in your code:
 
 ```julia
 result = lg_gpio_claim_output(handle, 0, gpio, LG_LOW)
@@ -250,18 +365,21 @@ if result < 0
 end
 ```
 
-## Cleanup
+## Resource Management
 
-To ensure proper cleanup of resources, especially when your program ends:
+The module automatically manages resources and provides functions for proper cleanup:
 
 ```julia
 # Close any open handles
 lg_gpio_free(handle, gpio)
 lg_gpiochip_close(handle)
 
-# Final cleanup
+# The module automatically handles cleanup when Julia exits
+# but you can also call it explicitly
 cleanup()
 ```
+
+The improved version includes better callback registry management and proper cleanup of thread resources.
 
 ## Constants
 
@@ -318,6 +436,28 @@ finally
 end
 ```
 
+### Checking Library Availability
+
+```julia
+using PI5_LG_IO
+
+# Check if the library is usable
+if !is_liblgpio_usable()
+    println("liblgpio is not available or not properly installed")
+    exit(1)
+end
+
+# Check package configuration
+config = check_package_configuration()
+println("Library loaded: $(config["library_loaded"])")
+println("Julia version: $(config["julia_version"])")
+
+# If there was an error loading the library
+if !config["library_loaded"]
+    println("Error: $(config["library_error"])")
+end
+```
+
 ## License
 
 This project is licensed under the MIT License:
@@ -325,7 +465,7 @@ This project is licensed under the MIT License:
 ```
 MIT License
 
-Copyright (c) 2025 Jin-Soo Kim, Expikx company
+Copyright (c) 2024 Jin-Soo Kim, Expikx company
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
